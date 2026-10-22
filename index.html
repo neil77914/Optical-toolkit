@@ -157,6 +157,13 @@
           <input type="number" id="qty-L" value="150" placeholder="例如 150">
         </div>
       </div>
+      <div class="field" id="qty-L2-field" style="display:none">
+        <label id="qty-L2-label">短邊長度 (mm)</label>
+        <div class="slidebox">
+          <input type="range" id="qty-L2-range" min="0" max="500" step="0.1" value="80">
+          <input type="number" id="qty-L2" value="80" placeholder="例如 80">
+        </div>
+      </div>
       <div class="field">
         <label>光程 H (mm)</label>
         <div class="slidebox">
@@ -279,9 +286,10 @@ document.querySelectorAll('#qty-shape button').forEach(btn=>{
     btn.classList.add('on');
     qtyShape = btn.dataset.v;
     document.getElementById('qty-circ-measure').style.display = qtyShape==='circ' ? 'block' : 'none';
+    document.getElementById('qty-L2-field').style.display = qtyShape==='rect' ? 'block' : 'none';
     const Llabel = document.getElementById('qty-L-label');
     if(qtyShape==='bar'){ Llabel.textContent='發光長度 L (mm)'; setLRangeMax('bar'); }
-    else if(qtyShape==='rect'){ Llabel.textContent='單邊發光長度 L (mm)'; setLRangeMax('rect'); }
+    else if(qtyShape==='rect'){ Llabel.textContent='長邊長度 (mm)'; setLRangeMax('rect'); }
     else {
       const m = circMeasure;
       Llabel.textContent = m==='circumference' ? 'Circumference 圓周 (mm)' : m==='diameter' ? 'Diameter 直徑 (mm)' : 'Radius 半徑 (mm)';
@@ -314,18 +322,20 @@ function linkSlider(rangeId, numberId){
   });
 }
 linkSlider('qty-L-range','qty-L');
+linkSlider('qty-L2-range','qty-L2');
 linkSlider('qty-H-range','qty-H');
 
 function runQty(){
   const H = parseFloat(document.getElementById('qty-H').value);
   const A = 55; // LED angle 固定 55°，不提供調整
   const Lval = parseFloat(document.getElementById('qty-L').value);
+  const L2val = parseFloat(document.getElementById('qty-L2').value);
   const resultEl = document.getElementById('qty-result');
   const vizEl = document.getElementById('qty-viz');
 
-  if(isNaN(H) || isNaN(Lval)){
+  if(isNaN(H) || isNaN(Lval) || (qtyShape==='rect' && isNaN(L2val))){
     resultEl.className='result empty';
-    resultEl.innerHTML='⚠️ 請輸入完整數值（光程 H 與長度/圓周/直徑/半徑）。';
+    resultEl.innerHTML='⚠️ 請輸入完整數值（光程 H、長邊 / 短邊，或長度/圓周/直徑/半徑）。';
     vizEl.style.display='none';
     return;
   }
@@ -343,18 +353,20 @@ function runQty(){
       </div>`;
     drawBarViz(vizEl, Lval, aPrime, qty);
   } else if(qtyShape==='rect'){
-    const nBar = Math.ceil(Lval / aPrime);
-    const total = nBar + 4;
+    const nLong = Math.ceil(Lval / aPrime);
+    const nShort = Math.ceil(L2val / aPrime);
+    const total = 2*(nLong + nShort) + 4;
     resultEl.className='result';
     resultEl.innerHTML = `
       <div class="kv">
         <span class="k">Model</span><span class="v">Ring (Rectangle) <span class="tag">CALC</span></span>
-        <span class="k">Coverage a′</span><span class="v">${aPrime.toFixed(3)} mm</span>
-        <span class="k">LED per side</span><span class="v">${nBar}</span>
+        <span class="k">Coverage a′ (shared pitch)</span><span class="v">${aPrime.toFixed(3)} mm</span>
+        <span class="k">LED per long side</span><span class="v">${nLong} × 2</span>
+        <span class="k">LED per short side</span><span class="v">${nShort} × 2</span>
         <span class="k">Corner compensation</span><span class="v">+4</span>
         <span class="k">Total LED Quantity</span><span class="v big">${total}</span>
       </div>`;
-    drawRectViz(vizEl, nBar);
+    drawRectViz(vizEl, Lval, L2val, nLong, nShort);
   } else {
     let C;
     if(circMeasure==='circumference') C = Lval;
@@ -389,26 +401,31 @@ function drawBarViz(el, L, aPrime, qty){
     <text x="160" y="130" fill="var(--text-dim)" font-size="11" text-anchor="middle" font-family="JetBrains Mono, monospace">L = ${L} mm · a′ = ${aPrime.toFixed(2)} mm</text>`;
   el.innerHTML = svgWrap(inner);
 }
-function drawRectViz(el, nBar){
+function drawRectViz(el, L1, L2, nLong, nShort){
   el.style.display='flex';
-  const w=220,h=120,x0=50,y0=20;
+  const vbW=340, vbH=210;
+  const maxW=260, maxH=120;
+  const scale = Math.min(maxW/L1, maxH/L2);
+  const w = L1*scale, h = L2*scale;
+  const x0 = (vbW-w)/2, y0 = 30;
   let dots='';
-  const perSide = nBar;
-  for(let s=0;s<4;s++){
-    for(let i=0;i<perSide;i++){
-      const t=(i+0.5)/perSide;
-      let x,y;
-      if(s===0){x=x0+t*w;y=y0;}
-      else if(s===1){x=x0+w;y=y0+t*h;}
-      else if(s===2){x=x0+w-t*w;y=y0+h;}
-      else {x=x0;y=y0+h-t*h;}
-      dots+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="var(--accent)" opacity="0.9"/>`;
-    }
+  // top & bottom (long sides) — nLong evenly spaced
+  for(let i=0;i<nLong;i++){
+    const t=(i+0.5)/nLong;
+    dots+=`<circle cx="${(x0+t*w).toFixed(1)}" cy="${y0.toFixed(1)}" r="4" fill="var(--accent)" opacity="0.9"/>`;
+    dots+=`<circle cx="${(x0+t*w).toFixed(1)}" cy="${(y0+h).toFixed(1)}" r="4" fill="var(--accent)" opacity="0.9"/>`;
   }
-  const corners = [[x0,y0],[x0+w,y0],[x0+w,y0+h],[x0,y0+h]].map(c=>`<circle cx="${c[0]}" cy="${c[1]}" r="5" fill="var(--y)"/>`).join('');
-  const inner = `<rect x="${x0}" y="${y0}" width="${w}" height="${h}" fill="none" stroke="var(--line)" stroke-width="3"/>${dots}${corners}
-    <text x="160" y="158" fill="var(--text-dim)" font-size="11" text-anchor="middle" font-family="JetBrains Mono, monospace">amber = corner compensation (+4)</text>`;
-  el.innerHTML = svgWrap(inner, '0 0 320 175');
+  // left & right (short sides) — nShort evenly spaced
+  for(let i=0;i<nShort;i++){
+    const t=(i+0.5)/nShort;
+    dots+=`<circle cx="${x0.toFixed(1)}" cy="${(y0+t*h).toFixed(1)}" r="4" fill="var(--accent)" opacity="0.9"/>`;
+    dots+=`<circle cx="${(x0+w).toFixed(1)}" cy="${(y0+t*h).toFixed(1)}" r="4" fill="var(--accent)" opacity="0.9"/>`;
+  }
+  const corners = [[x0,y0],[x0+w,y0],[x0+w,y0+h],[x0,y0+h]]
+    .map(c=>`<circle cx="${c[0].toFixed(1)}" cy="${c[1].toFixed(1)}" r="5" fill="var(--y)"/>`).join('');
+  const inner = `<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="none" stroke="var(--line)" stroke-width="3"/>${dots}${corners}
+    <text x="${vbW/2}" y="${vbH-12}" fill="var(--text-dim)" font-size="11" text-anchor="middle" font-family="JetBrains Mono, monospace">amber = corner compensation (+4) · long×${nLong} / short×${nShort}, shared pitch</text>`;
+  el.innerHTML = svgWrap(inner, `0 0 ${vbW} ${vbH}`);
 }
 function drawCircViz(el, qty){
   el.style.display='flex';
